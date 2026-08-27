@@ -9,7 +9,7 @@ npm install
 npm run dev
 ```
 
-Die Demo-Anmeldung akzeptiert jede gültige E-Mail-Adresse und ein Passwort mit mindestens sechs Zeichen. Nutzerdaten, Sounds und Bilder werden ausschließlich im Local Storage des Browsers gespeichert.
+Für den Serverbetrieb werden `ADMIN_EMAIL`, `ADMIN_PASSWORD` und optional `DATA_DIR` als Umgebungsvariablen benötigt. Freigegebene Startseiten-Sounds werden zentral in `DATA_DIR/featured.json` gespeichert und sind ohne Anmeldung abspielbar; Änderungen erfordern eine gültige Admin-Sitzung. Nicht freigegebene Sounds bleiben lokal im Browser des Administrators.
 
 ## Funktionen
 

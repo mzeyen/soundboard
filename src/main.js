@@ -15,8 +15,9 @@ const starterPads = [
 ];
 
 const state = {
-  user: JSON.parse(localStorage.getItem('waveboard-user') || 'null'),
+  user: null,
   pads: JSON.parse(localStorage.getItem('waveboard-pads') || 'null') || starterPads,
+  publicPads: [],
   activeId: null,
   audio: null,
   volume: 74,
@@ -28,6 +29,13 @@ const app = document.querySelector('#app');
 
 function savePads() {
   localStorage.setItem('waveboard-pads', JSON.stringify(state.pads));
+}
+
+async function publishFeatured() {
+  const featured = state.pads.filter(p => p.featured);
+  const response = await fetch('/api/featured', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(featured) });
+  if (!response.ok) throw new Error('Freigabe konnte nicht gespeichert werden');
+  state.publicPads = featured;
 }
 
 function createId() {
@@ -64,12 +72,24 @@ function loginView() {
       <p class="login-footer">Mit Liebe für Creator gebaut&nbsp; <span>●</span>&nbsp; Deine Sounds bleiben in deinem Browser.</p>
     </main>`;
   createIcons();
-  document.querySelector('#login-form').addEventListener('submit', (e) => {
+  document.querySelector('#login-form').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const email = new FormData(e.target).get('email');
-    state.user = { name: email.split('@')[0].replace(/[._-]/g, ' '), email };
-    localStorage.setItem('waveboard-user', JSON.stringify(state.user));
-    dashboardView();
+    const form = e.target, data = new FormData(form), button = form.querySelector('.login-button');
+    button.disabled = true;
+    try {
+      const response = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: data.get('email'), password: data.get('password') }) });
+      if (!response.ok) { alert((await response.json()).error || 'Anmeldung fehlgeschlagen.'); button.disabled = false; return; }
+      state.user = await response.json();
+      const publicIds = new Set(state.publicPads.map(p => p.id));
+      state.pads = [...state.pads.map(p => ({ ...p, featured: p.featured || publicIds.has(p.id) })), ...state.publicPads.filter(p => !state.pads.some(local => local.id === p.id))];
+      savePads();
+      await publishFeatured();
+      dashboardView();
+    } catch (error) {
+      console.error('Anmeldung fehlgeschlagen', error);
+      alert('Der Server ist momentan nicht erreichbar. Bitte versuche es erneut.');
+      button.disabled = false;
+    }
   });
   document.querySelector('#signup').addEventListener('click', () => document.querySelector('input[name="email"]').focus());
 }
@@ -82,6 +102,37 @@ function padMarkup(pad, { selectable = false, deletable = true } = {}) {
     ${selectable ? `<label class="home-select" title="Auf der Startseite anzeigen"><input type="checkbox" data-feature-id="${pad.id}" ${pad.featured ? 'checked' : ''}><span>${icon('check', 14)}</span><em>Startseite</em></label>` : ''}
     ${deletable ? `<button class="delete-pad" title="Sound löschen" aria-label="Sound löschen">${icon('trash-2', 15)}</button>` : ''}
   </article>`;
+}
+
+function renderCurrentView() {
+  state.user ? dashboardView() : publicHomeView();
+}
+
+function publicHomeView() {
+  const featured = state.publicPads;
+  app.innerHTML = `
+    <main class="public-home">
+      <header class="public-header">
+        <div class="brand"><span class="brand-mark">${icon('waves', 24)}</span><span>Wave<span>board</span></span></div>
+        <button class="secondary public-login" id="public-login">Anmelden</button>
+      </header>
+      <section class="public-hero">
+        <p class="eyebrow">WAVEBOARD · DIREKT BEREIT</p>
+        <h1>Sounds für<br><span>den richtigen Moment.</span></h1>
+        <p>Einfach einen Sound auswählen und direkt abspielen.</p>
+      </section>
+      <section class="public-board">
+        <div class="board-heading"><div><h2>Verfügbare Sounds</h2><p>${featured.length} ${featured.length === 1 ? 'Sound' : 'Sounds'} freigegeben</p></div></div>
+        ${featured.length ? `<div class="pad-grid public-grid">${featured.map(p => padMarkup(p, { deletable: false })).join('')}</div>` : `<div class="empty-home"><span>${icon('music-2', 28)}</span><h2>Noch keine Sounds freigegeben</h2><p>Nach der Anmeldung können Sounds für diese Startseite ausgewählt werden.</p><button class="primary" id="empty-login">Anmelden und Sounds auswählen</button></div>`}
+      </section>
+      <footer><span><i></i> System bereit</span><span>Waveboard v1.0</span></footer>
+    </main>`;
+  createIcons();
+  document.querySelectorAll('.pad').forEach(el => {
+    el.addEventListener('click', () => playPad(el.dataset.id));
+    el.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') playPad(el.dataset.id); });
+  });
+  ['#public-login', '#empty-login'].forEach(s => document.querySelector(s)?.addEventListener('click', loginView));
 }
 
 function dashboardView() {
@@ -126,33 +177,39 @@ function bindDashboard() {
   document.querySelectorAll('[data-feature-id]').forEach(input => input.addEventListener('click', e => e.stopPropagation()));
   document.querySelectorAll('[data-feature-id]').forEach(input => input.addEventListener('change', () => {
     const pad = state.pads.find(p => p.id === input.dataset.featureId);
-    if (pad) { pad.featured = input.checked; savePads(); }
+    if (pad) {
+      pad.featured = input.checked; savePads();
+      publishFeatured().catch(() => { pad.featured = !input.checked; savePads(); input.checked = pad.featured; alert('Die Startseiten-Auswahl konnte nicht gespeichert werden.'); });
+    }
   }));
   document.querySelector('#nav-home')?.addEventListener('click', () => { state.page = 'home'; dashboardView(); });
   document.querySelector('#nav-board')?.addEventListener('click', () => { state.page = 'board'; dashboardView(); });
   document.querySelector('.mobile-brand')?.addEventListener('click', () => { state.page = 'home'; dashboardView(); });
   ['#edit-selection', '#choose-sounds'].forEach(s => document.querySelector(s)?.addEventListener('click', () => { state.page = 'board'; dashboardView(); }));
   ['#add-sound', '#add-tile', '#nav-upload'].forEach(s => document.querySelector(s)?.addEventListener('click', openUploadModal));
-  document.querySelector('#logout').addEventListener('click', () => { localStorage.removeItem('waveboard-user'); state.user = null; loginView(); });
+  document.querySelector('#logout').addEventListener('click', async () => { await fetch('/api/logout', { method: 'POST' }); state.user = null; publicHomeView(); });
   document.querySelector('#volume').addEventListener('input', e => { state.volume = e.target.value; e.target.nextElementSibling.textContent = `${state.volume}%`; if (state.audio) state.audio.volume = state.volume / 100; });
 }
 
 function playPad(id) {
-  const pad = state.pads.find(p => p.id === id);
-  if (state.activeId === id) { state.audio?.pause(); state.activeId = null; dashboardView(); return; }
+  const pad = state.pads.find(p => p.id === id) || state.publicPads.find(p => p.id === id);
+  if (state.activeId === id) { state.audio?.pause(); state.activeId = null; renderCurrentView(); return; }
   state.audio?.pause();
   state.activeId = id;
   if (pad.audio) {
     state.audio = new Audio(pad.audio); state.audio.volume = state.volume / 100;
-    state.audio.play().catch(() => {}); state.audio.onended = () => { state.activeId = null; dashboardView(); };
+    state.audio.play().catch(() => {}); state.audio.onended = () => { state.activeId = null; renderCurrentView(); };
   } else {
-    state.audio = null; setTimeout(() => { if (state.activeId === id) { state.activeId = null; dashboardView(); } }, 1600);
+    state.audio = null; setTimeout(() => { if (state.activeId === id) { state.activeId = null; renderCurrentView(); } }, 1600);
   }
-  dashboardView();
+  renderCurrentView();
 }
 
 function deletePad(id) {
-  state.pads = state.pads.filter(p => p.id !== id); savePads(); dashboardView();
+  const wasFeatured = state.pads.find(p => p.id === id)?.featured;
+  state.pads = state.pads.filter(p => p.id !== id); savePads();
+  if (wasFeatured) publishFeatured().catch(() => alert('Die öffentliche Startseite konnte nicht aktualisiert werden.'));
+  dashboardView();
 }
 
 function openUploadModal() {
@@ -186,6 +243,21 @@ function openUploadModal() {
   });
 }
 
-window.addEventListener('keydown', e => { if (!document.querySelector('.modal') && /^[1-8]$/.test(e.key) && state.user) { const pad = state.pads[Number(e.key)-1]; if (pad) playPad(pad.id); } });
+window.addEventListener('keydown', e => { if (!document.querySelector('.modal') && /^[1-8]$/.test(e.key)) { const pads = state.user ? state.pads : state.publicPads; const pad = pads[Number(e.key)-1]; if (pad) playPad(pad.id); } });
 
-state.user ? dashboardView() : loginView();
+async function bootstrap() {
+  try {
+    const featuredResponse = await fetch('/api/featured');
+    if (featuredResponse.ok) state.publicPads = await featuredResponse.json();
+    const sessionResponse = await fetch('/api/session');
+    if (sessionResponse.ok) {
+      state.user = await sessionResponse.json();
+      const publicIds = new Set(state.publicPads.map(p => p.id));
+      state.pads = [...state.pads.map(p => ({ ...p, featured: publicIds.has(p.id) })), ...state.publicPads.filter(p => !state.pads.some(local => local.id === p.id))];
+      savePads();
+    }
+  } catch (error) { console.error('Serverdaten konnten nicht geladen werden', error); }
+  renderCurrentView();
+}
+
+bootstrap();
