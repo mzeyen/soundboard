@@ -20,13 +20,24 @@ const state = {
   activeId: null,
   audio: null,
   volume: 74,
-  filter: 'Alle Sounds'
+  filter: 'Alle Sounds',
+  page: 'home'
 };
 
 const app = document.querySelector('#app');
 
 function savePads() {
   localStorage.setItem('waveboard-pads', JSON.stringify(state.pads));
+}
+
+function createId() {
+  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = [...bytes].map(byte => byte.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 function icon(name, size = 18) {
@@ -63,12 +74,13 @@ function loginView() {
   document.querySelector('#signup').addEventListener('click', () => document.querySelector('input[name="email"]').focus());
 }
 
-function padMarkup(pad) {
+function padMarkup(pad, { selectable = false, deletable = true } = {}) {
   const custom = pad.image ? `style="--pad-image:url('${pad.image}')"` : '';
   return `<article class="pad ${pad.theme || 'custom'} ${state.activeId === pad.id ? 'playing' : ''}" data-id="${pad.id}" tabindex="0" role="button" aria-label="${pad.title} abspielen" ${custom}>
     <div class="pad-art"><span class="pad-key">${pad.key || '•'}</span><div class="play-orbit">${icon(state.activeId === pad.id ? 'pause' : 'play', 27)}</div></div>
     <div class="pad-info"><div><h3>${pad.title}</h3><p>${pad.category}</p></div><span class="duration">${pad.duration || 'NEU'}</span></div>
-    <button class="delete-pad" title="Sound löschen" aria-label="Sound löschen">${icon('trash-2', 15)}</button>
+    ${selectable ? `<label class="home-select" title="Auf der Startseite anzeigen"><input type="checkbox" data-feature-id="${pad.id}" ${pad.featured ? 'checked' : ''}><span>${icon('check', 14)}</span><em>Startseite</em></label>` : ''}
+    ${deletable ? `<button class="delete-pad" title="Sound löschen" aria-label="Sound löschen">${icon('trash-2', 15)}</button>` : ''}
   </article>`;
 }
 
@@ -76,22 +88,24 @@ function dashboardView() {
   const firstName = state.user?.name?.split(' ')[0] || 'Creator';
   const categories = ['Alle Sounds', ...new Set(state.pads.map(p => p.category))];
   const shown = state.filter === 'Alle Sounds' ? state.pads : state.pads.filter(p => p.category === state.filter);
+  const featured = state.pads.filter(p => p.featured);
+  const isHome = state.page === 'home';
   app.innerHTML = `
     <div class="app-shell">
       <aside class="sidebar">
         <div class="brand"><span class="brand-mark">${icon('waves', 24)}</span><span>Wave<span>board</span></span></div>
-        <nav><p class="nav-label">MEIN BEREICH</p><button class="nav-item active">${icon('music-2')} Soundboard <span>${state.pads.length}</span></button><button class="nav-item" id="nav-upload">${icon('upload')} Uploads</button><p class="nav-label space">SAMMLUNGEN</p>
+        <nav><p class="nav-label">MEIN BEREICH</p><button class="nav-item ${isHome ? 'active' : ''}" id="nav-home">${icon('waves')} Startseite <span>${featured.length}</span></button><button class="nav-item ${!isHome ? 'active' : ''}" id="nav-board">${icon('music-2')} Soundboard <span>${state.pads.length}</span></button><button class="nav-item" id="nav-upload">${icon('upload')} Uploads</button><p class="nav-label space">SAMMLUNGEN</p>
         ${categories.slice(1, 5).map((c, i) => `<button class="nav-item filter-link" data-filter="${c}"><span class="dot dot-${i}"></span>${c}</button>`).join('')}</nav>
         <div class="sidebar-tip"><div>${icon('volume-2', 19)}</div><strong>Pro-Tipp</strong><p>Nutze die Tasten 1–8, um Sounds blitzschnell abzuspielen.</p></div>
         <div class="profile"><div class="avatar">${firstName.slice(0, 2).toUpperCase()}</div><div><strong>${firstName}</strong><span>Creator Account</span></div><button id="logout" title="Abmelden">${icon('log-out', 17)}</button></div>
       </aside>
       <main class="workspace">
         <header><div class="mobile-brand brand"><span class="brand-mark">${icon('waves', 22)}</span>Wave<span>board</span></div><div class="header-actions"><div class="master-volume">${icon('volume-2', 18)}<input id="volume" type="range" min="0" max="100" value="${state.volume}" /><span>${state.volume}%</span></div><button class="icon-button">${icon('settings', 19)}</button><button class="primary" id="add-sound">${icon('plus', 18)} Sound hinzufügen</button></div></header>
-        <section class="hero"><div><p class="eyebrow">DONNERSTAG · BEREIT FÜR DIE SHOW</p><h1>Hey ${firstName},<br><span>mach etwas Lärm.</span></h1><p>Deine Sounds, genau im richtigen Moment. Klick auf ein Pad oder nutze die Tastatur.</p></div><div class="now-playing"><div class="equalizer"><i></i><i></i><i></i><i></i><i></i></div><div><span>JETZT BEREIT</span><strong>${state.pads.length} Sounds geladen</strong></div></div></section>
-        <section class="board-section">
+        <section class="hero"><div><p class="eyebrow">DONNERSTAG · BEREIT FÜR DIE SHOW</p><h1>${isHome ? `Willkommen, ${firstName}.<br><span>Deine Favoriten.</span>` : `Hey ${firstName},<br><span>mach etwas Lärm.</span>`}</h1><p>${isHome ? 'Alle wichtigen Sounds direkt griffbereit auf deiner Startseite.' : 'Deine Sounds, genau im richtigen Moment. Klick auf ein Pad oder nutze die Tastatur.'}</p></div><div class="now-playing"><div class="equalizer"><i></i><i></i><i></i><i></i><i></i></div><div><span>JETZT BEREIT</span><strong>${state.pads.length} Sounds geladen</strong></div></div></section>
+        ${isHome ? `<section class="board-section home-section"><div class="board-heading"><div><h2>Sounds auf deiner Startseite</h2><p>${featured.length} ${featured.length === 1 ? 'Sound' : 'Sounds'} ausgewählt</p></div><button class="secondary" id="edit-selection">Auswahl bearbeiten</button></div>${featured.length ? `<div class="pad-grid home-grid">${featured.map(p => padMarkup(p, { deletable: false })).join('')}</div>` : `<div class="empty-home"><span>${icon('music-2', 28)}</span><h2>Noch keine Sounds ausgewählt</h2><p>Markiere Sounds im Soundboard per Checkbox, damit ihre Abspielbuttons hier erscheinen.</p><button class="primary" id="choose-sounds">Sounds auswählen</button></div>`}</section>` : `<section class="board-section">
           <div class="board-heading"><div><h2>Mein Soundboard</h2><p>${shown.length} Sounds in dieser Ansicht</p></div><div class="filters">${categories.slice(0,4).map(c => `<button data-filter="${c}" class="${state.filter === c ? 'active' : ''}">${c}</button>`).join('')}</div></div>
-          <div class="pad-grid">${shown.map(padMarkup).join('')}<button class="add-tile" id="add-tile"><span>${icon('plus', 28)}</span><strong>Neuer Sound</strong><small>MP3, WAV oder OGG</small></button></div>
-        </section>
+          <div class="pad-grid">${shown.map(p => padMarkup(p, { selectable: true })).join('')}<button class="add-tile" id="add-tile"><span>${icon('plus', 28)}</span><strong>Neuer Sound</strong><small>MP3, WAV oder OGG</small></button></div>
+        </section>`}
         <footer><span><i></i> System bereit</span><span>Waveboard v1.0</span></footer>
       </main>
     </div>
@@ -102,10 +116,22 @@ function dashboardView() {
 
 function bindDashboard() {
   document.querySelectorAll('.pad').forEach(el => {
-    el.addEventListener('click', e => e.target.closest('.delete-pad') ? deletePad(el.dataset.id) : playPad(el.dataset.id));
+    el.addEventListener('click', e => {
+      if (e.target.closest('.home-select')) return;
+      e.target.closest('.delete-pad') ? deletePad(el.dataset.id) : playPad(el.dataset.id);
+    });
     el.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') playPad(el.dataset.id); });
   });
-  document.querySelectorAll('[data-filter]').forEach(b => b.addEventListener('click', () => { state.filter = b.dataset.filter; dashboardView(); }));
+  document.querySelectorAll('[data-filter]').forEach(b => b.addEventListener('click', () => { state.filter = b.dataset.filter; state.page = 'board'; dashboardView(); }));
+  document.querySelectorAll('[data-feature-id]').forEach(input => input.addEventListener('click', e => e.stopPropagation()));
+  document.querySelectorAll('[data-feature-id]').forEach(input => input.addEventListener('change', () => {
+    const pad = state.pads.find(p => p.id === input.dataset.featureId);
+    if (pad) { pad.featured = input.checked; savePads(); }
+  }));
+  document.querySelector('#nav-home')?.addEventListener('click', () => { state.page = 'home'; dashboardView(); });
+  document.querySelector('#nav-board')?.addEventListener('click', () => { state.page = 'board'; dashboardView(); });
+  document.querySelector('.mobile-brand')?.addEventListener('click', () => { state.page = 'home'; dashboardView(); });
+  ['#edit-selection', '#choose-sounds'].forEach(s => document.querySelector(s)?.addEventListener('click', () => { state.page = 'board'; dashboardView(); }));
   ['#add-sound', '#add-tile', '#nav-upload'].forEach(s => document.querySelector(s)?.addEventListener('click', openUploadModal));
   document.querySelector('#logout').addEventListener('click', () => { localStorage.removeItem('waveboard-user'); state.user = null; loginView(); });
   document.querySelector('#volume').addEventListener('input', e => { state.volume = e.target.value; e.target.nextElementSibling.textContent = `${state.volume}%`; if (state.audio) state.audio.volume = state.volume / 100; });
@@ -133,17 +159,30 @@ function openUploadModal() {
   document.querySelector('#modal-root').innerHTML = `<div class="modal-backdrop"><section class="modal"><button class="modal-close">${icon('x')}</button><span class="modal-icon">${icon('upload', 26)}</span><p class="eyebrow">NEUES PAD</p><h2>Sound hinzufügen</h2><p class="muted">Gib deinem Sound einen Namen und wähle die passenden Dateien.</p><form id="upload-form">
     <label>Name des Sounds<input name="title" placeholder="z. B. Epic Intro" required maxlength="28" /></label><label>Kategorie<input name="category" placeholder="z. B. Jingles" required maxlength="18" /></label>
     <div class="file-row"><label class="file-drop">${icon('music-2', 22)}<strong>Sounddatei</strong><span id="audio-name">MP3, WAV, OGG</span><input name="audio" type="file" accept="audio/*" required /></label><label class="file-drop">${icon('image', 22)}<strong>Hintergrundbild</strong><span id="image-name">JPG, PNG, WEBP</span><input name="image" type="file" accept="image/*" /></label></div>
-    <button class="primary submit-sound" type="submit">${icon('check', 18)} Soundboard-Pad erstellen</button></form></section></div>`;
+    <p id="upload-error" class="upload-error" role="alert" hidden></p><button class="primary submit-sound" type="submit">${icon('check', 18)} Soundboard-Pad erstellen</button></form></section></div>`;
   createIcons();
   const close = () => document.querySelector('#modal-root').innerHTML = '';
   document.querySelector('.modal-close').addEventListener('click', close);
   document.querySelector('.modal-backdrop').addEventListener('click', e => { if (e.target.classList.contains('modal-backdrop')) close(); });
   document.querySelectorAll('input[type=file]').forEach(input => input.addEventListener('change', () => { if (input.files[0]) input.previousElementSibling.textContent = input.files[0].name; }));
   document.querySelector('#upload-form').addEventListener('submit', async e => {
-    e.preventDefault(); const data = new FormData(e.target); const audio = data.get('audio'), image = data.get('image');
-    const toDataUrl = file => new Promise(resolve => { const r = new FileReader(); r.onload = () => resolve(r.result); r.readAsDataURL(file); });
-    state.pads.push({ id: crypto.randomUUID(), title: data.get('title'), category: data.get('category'), duration: 'NEU', theme: 'custom', audio: await toDataUrl(audio), image: image?.size ? await toDataUrl(image) : null, key: state.pads.length < 9 ? String(state.pads.length + 1) : '•' });
-    savePads(); close(); state.filter = 'Alle Sounds'; dashboardView();
+    e.preventDefault();
+    const form = e.target, button = form.querySelector('.submit-sound'), error = form.querySelector('#upload-error');
+    const data = new FormData(form), audio = data.get('audio'), image = data.get('image');
+    const toDataUrl = file => new Promise((resolve, reject) => { const r = new FileReader(); r.onload = () => resolve(r.result); r.onerror = () => reject(r.error); r.readAsDataURL(file); });
+    error.hidden = true; button.disabled = true;
+    try {
+      const pad = { id: createId(), title: data.get('title'), category: data.get('category'), duration: 'NEU', theme: 'custom', audio: await toDataUrl(audio), image: image?.size ? await toDataUrl(image) : null, key: state.pads.length < 9 ? String(state.pads.length + 1) : '•' };
+      state.pads.push(pad);
+      try { savePads(); } catch (storageError) { state.pads.pop(); throw storageError; }
+      close(); state.filter = 'Alle Sounds'; dashboardView();
+    } catch (uploadError) {
+      console.error('Sound konnte nicht gespeichert werden', uploadError);
+      error.textContent = uploadError?.name === 'QuotaExceededError'
+        ? 'Die Datei ist zu groß für den Browser-Speicher. Bitte wähle eine kleinere oder stärker komprimierte Audiodatei.'
+        : 'Der Sound konnte nicht gespeichert werden. Bitte versuche es mit einer anderen Datei.';
+      error.hidden = false; button.disabled = false;
+    }
   });
 }
 

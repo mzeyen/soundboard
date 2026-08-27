@@ -14,4 +14,5 @@ const server = createServer(async (req, res) => {
     res.end(await readFile(file));
   } catch { res.statusCode = 404; res.end('Not found'); }
 });
-server.listen(4173, '0.0.0.0', () => console.log(`Waveboard running on http://localhost:4173`));
+const port = Number(process.env.PORT) || 4173;
+server.listen(port, '0.0.0.0', () => console.log(`Waveboard running on http://localhost:${port}`));
